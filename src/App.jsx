@@ -3030,7 +3030,7 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
       </div>
       {detail && (
         <Sheet onClose={()=>setDetail(null)} title={detail.inProgram ? (mode==="paleo" ? `${detail.programDay}日目` : `Day ${detail.programDay}`) : `${detail.dateObj.getMonth()+1}/${detail.dateObj.getDate()}`}>
-          <DaySheet ds={detail.ds} day={detail.d} setDay={setDay} mode={mode} />
+          <DaySheet ds={detail.ds} day={getDay(detail.ds)} setDay={setDay} mode={mode} />
         </Sheet>
       )}
     </div>
@@ -3337,7 +3337,7 @@ function DaySheet({ ds, day, setDay, mode }) {
         padding: "13px 14px", background: (d && d.period) ? C.plum : C.card, color: (d && d.period) ? "#fff" : C.ink,
         border: `1.5px solid ${(d && d.period) ? C.plum : C.line}`, borderRadius: 14, fontFamily: FONT,
         fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-        <CircleDot size={17} /> {(d && d.period) ? "生理中(タップで解除)" : "この日を生理の日に"}
+        <CircleDot size={17} /> {(d && d.period) ? "生理中(タップで解除)" : "この日を生理の日にする"}
       </button>
     </div>
   );
