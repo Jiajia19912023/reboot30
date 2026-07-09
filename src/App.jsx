@@ -1376,7 +1376,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const s = await loadState();
-      setState(s || { settings: { startDate: todayStr(), mode: "paleo" }, days: {} });
+      // アプリは常に「パレオ(標準モード)」で開く。リブートへの切替はセッション中のみ有効
+      setState(s
+        ? { ...s, settings: { ...s.settings, mode: "paleo" } }
+        : { settings: { startDate: todayStr(), mode: "paleo" }, days: {} });
       const mr = await loadMyRecipes();
       setMyRecipes(mr);
       const fl = await loadFolders();
@@ -1697,7 +1700,7 @@ function CompletionReport({ state, start, onClose }) {
     days.push(state.days[ds]);
   }
   const logged = days.filter(Boolean);
-  const scores = logged.map(d => scoreDay(d).score);
+  const scores = logged.map(d => scoreDay(d, "reboot").score); // 30日リブート完走レポートなのでリブート基準で採点
   const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
   const fishDays = logged.filter(d => [...d.meals.breakfast,...d.meals.lunch,...d.meals.dinner,...d.meals.snack].some(it=>(it.f||[]).includes("fish"))).length;
   const violations = logged.filter(d => d.violation).length;
