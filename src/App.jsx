@@ -1389,6 +1389,13 @@ export default function App() {
   useEffect(() => { if (loaded) saveMyRecipes(myRecipes); }, [myRecipes, loaded]);
   useEffect(() => { if (loaded) saveFolders(folders); }, [folders, loaded]);
 
+  // タブを切り替えたら必ずページ先頭で開く(前のページのスクロール位置を引き継がない)
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [tab]);
+
   if (showSplash) return <Splash leaving={splashLeaving} />;
 
   if (!loaded || !state) {
