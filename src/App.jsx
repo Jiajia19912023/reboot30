@@ -3226,10 +3226,17 @@ function CycleModel({ th, cycleInfo }) {
                   const { viewBox } = props;
                   const x = viewBox.x;
                   const topY = viewBox.y - 16;
+                  const W = 36, H = 16;
+                  // 両端(周期1日目/28日目付近)でバッジがグラフ外に見切れないよう、寄せる向きを変える
+                  let rectX;
+                  if (todayCycleDay <= 3) rectX = x - 1;            // 左端寄り → 右へ伸ばす
+                  else if (todayCycleDay >= 26) rectX = x - W + 1;  // 右端寄り → 左へ伸ばす
+                  else rectX = x - W / 2;                            // 中央 → センタリング
+                  const textX = rectX + W / 2;
                   return (
                     <g>
-                      <rect x={x - 18} y={topY} width={36} height={16} rx={8} fill={C.ink} />
-                      <text x={x} y={topY + 11} textAnchor="middle" fontSize={10} fontWeight={800} fill="#fff" fontFamily={FONT}>今日</text>
+                      <rect x={rectX} y={topY} width={W} height={H} rx={8} fill={C.ink} />
+                      <text x={textX} y={topY + 11} textAnchor="middle" fontSize={10} fontWeight={800} fill="#fff" fontFamily={FONT}>今日</text>
                     </g>
                   );
                 }} />
