@@ -1531,6 +1531,40 @@ export default function App() {
     });
   };
 
+  // バックアップ: 記録・マイレシピ・フォルダ・設定をJSONファイルで書き出す
+  const exportBackup = () => {
+    const payload = { app: "reboot30", version: 1, exportedAt: new Date().toISOString(),
+      state, myRecipes, folders };
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const d0 = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    a.href = url;
+    a.download = `reboot30-backup-${d0.getFullYear()}${pad(d0.getMonth()+1)}${pad(d0.getDate())}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  // バックアップからの復元(現在のデータを上書き)
+  const importBackup = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data || data.app !== "reboot30" || !data.state || !data.state.settings) {
+          window.alert("このファイルはreboot30のバックアップではないようです。"); return;
+        }
+        if (!window.confirm("バックアップから復元します。現在の記録・マイレシピは上書きされます。よろしいですか？")) return;
+        setState(data.state);
+        setMyRecipes(Array.isArray(data.myRecipes) ? data.myRecipes : []);
+        setFolders(Array.isArray(data.folders) ? data.folders : []);
+        window.alert("復元が完了しました。");
+      } catch (e) {
+        window.alert("読み込みに失敗しました。ファイルが壊れている可能性があります。");
+      }
+    };
+    reader.readAsText(file);
+  };
   // すべての記録を削除し、今日をDay1として再スタートする
   const wipeAllRecords = () => {
     setState((prev) => ({ ...prev,
@@ -1564,7 +1598,7 @@ export default function App() {
   const moveRecipeToFolder = (recipeId, folderId) =>
     setMyRecipes((prev) => prev.map(r => r.id === recipeId ? { ...r, folderId: folderId || null } : r));
 
-  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, wipeAllRecords, setTab,
+  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, wipeAllRecords, exportBackup, importBackup, setTab,
     myRecipes, addMyRecipe, deleteMyRecipe, mode, setMode, th: THEME(mode),
     editDate, setEditDate,
     folders, addFolder, renameFolder, deleteFolder, moveRecipeToFolder };
@@ -1994,7 +2028,7 @@ function GuideScreen({ onClose, mode = "reboot", th }) {
 /* ============================================================
    LOG (記録)
    ============================================================ */
-function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
+function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, exportBackup, importBackup, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
   const [pickerSlot, setPickerSlot] = useState(null);
   const [confirmNG, setConfirmNG] = useState(null);
   const [exType, setExType] = useState("");
@@ -2318,6 +2352,26 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, mode, s
         </button>
         <div style={{ fontSize: 11.5, color: C.inkFaint, textAlign: "center", marginTop: 8 }}>
           マイレシピと設定は残ります。記録だけが消えます。
+        </div>
+
+        {/* バックアップの書き出し・復元 */}
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button onClick={exportBackup} style={{ flex: 1, background: C.card, border: `1.5px solid ${C.line}`,
+            color: C.ink, borderRadius: 14, padding: "12px 6px", fontSize: 13, fontWeight: 700,
+            fontFamily: FONT, cursor: "pointer" }}>
+            📦 バックアップを書き出す
+          </button>
+          <label style={{ flex: 1, background: C.card, border: `1.5px solid ${C.line}`,
+            color: C.ink, borderRadius: 14, padding: "12px 6px", fontSize: 13, fontWeight: 700,
+            fontFamily: FONT, cursor: "pointer", textAlign: "center" }}>
+            ↩️ ファイルから復元
+            <input type="file" accept=".json,application/json" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ""; }} />
+          </label>
+        </div>
+        <div style={{ fontSize: 11.5, color: C.inkFaint, textAlign: "center", marginTop: 8, lineHeight: 1.6 }}>
+          記録・マイレシピ・フォルダ・設定を1つのファイルに保存します。<br />
+          機種変更やデータ消失に備えて、ときどき書き出しておくのがおすすめです。
         </div>
       </div>
     </div>
