@@ -1566,6 +1566,10 @@ export default function App() {
     };
     reader.readAsText(file);
   };
+  // 表示中の日の記録だけを削除する
+  const deleteDayRecord = (ds) => {
+    setState((prev) => { const days = { ...prev.days }; delete days[ds]; return { ...prev, days }; });
+  };
   // すべての記録を削除し、今日をDay1として再スタートする
   const wipeAllRecords = () => {
     setState((prev) => ({ ...prev,
@@ -1599,7 +1603,7 @@ export default function App() {
   const moveRecipeToFolder = (recipeId, folderId) =>
     setMyRecipes((prev) => prev.map(r => r.id === recipeId ? { ...r, folderId: folderId || null } : r));
 
-  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, wipeAllRecords, exportBackup, importBackup, setTab,
+  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, wipeAllRecords, deleteDayRecord, exportBackup, importBackup, setTab,
     myRecipes, addMyRecipe, deleteMyRecipe, mode, setMode, th: THEME(mode),
     editDate, setEditDate,
     folders, addFolder, renameFolder, deleteFolder, moveRecipeToFolder };
@@ -2029,7 +2033,7 @@ function GuideScreen({ onClose, mode = "reboot", th }) {
 /* ============================================================
    LOG (記録)
    ============================================================ */
-function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, exportBackup, importBackup, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
+function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteDayRecord, exportBackup, importBackup, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
   const [pickerSlot, setPickerSlot] = useState(null);
   const [confirmNG, setConfirmNG] = useState(null);
   const [exType, setExType] = useState("");
@@ -2341,22 +2345,18 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, exportB
         </Modal>
       )}
 
-      {/* 全記録の一括削除(Day1からやり直し) */}
+      {/* 表示中の日の記録を削除 */}
       <div style={{ padding: "30px 18px 0" }}>
         <button onClick={() => {
-          if (!window.confirm("すべての記録(食事・運動・体調・生理)を完全に削除します。よろしいですか？")) return;
-          if (!window.confirm("本当に削除しますか？この操作は元に戻せません。\n削除後は、今日がDay 1として再スタートします。")) return;
-          wipeAllRecords();
+          if (!window.confirm("この日の記録を削除します。よろしいですか？")) return;
+          deleteDayRecord(editDate);
         }} style={{ width: "100%", background: "transparent", border: `1.5px solid ${C.radish}`, color: C.radish,
           borderRadius: 14, padding: "12px", fontSize: 13.5, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
-          すべての記録を削除して Day 1 からやり直す
+          この記録を削除
         </button>
-        <div style={{ fontSize: 11.5, color: C.inkFaint, textAlign: "center", marginTop: 8 }}>
-          マイレシピと設定は残ります。記録だけが消えます。
-        </div>
 
         {/* バックアップの書き出し・復元 */}
-        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
           <button onClick={exportBackup} style={{ flex: 1, background: C.card, border: `1.5px solid ${C.line}`,
             color: C.ink, borderRadius: 14, padding: "12px 6px", fontSize: 13, fontWeight: 700,
             fontFamily: FONT, cursor: "pointer" }}>
@@ -2369,10 +2369,6 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, exportB
             <input type="file" accept=".json,application/json" style={{ display: "none" }}
               onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ""; }} />
           </label>
-        </div>
-        <div style={{ fontSize: 11.5, color: C.inkFaint, textAlign: "center", marginTop: 8, lineHeight: 1.6 }}>
-          記録・マイレシピ・フォルダ・設定を1つのファイルに保存します。<br />
-          機種変更やデータ消失に備えて、ときどき書き出しておくのがおすすめです。
         </div>
       </div>
     </div>
