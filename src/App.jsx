@@ -2355,21 +2355,6 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
           この記録を削除
         </button>
 
-        {/* バックアップの書き出し・復元 */}
-        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-          <button onClick={exportBackup} style={{ flex: 1, background: C.card, border: `1.5px solid ${C.line}`,
-            color: C.ink, borderRadius: 14, padding: "12px 6px", fontSize: 13, fontWeight: 700,
-            fontFamily: FONT, cursor: "pointer" }}>
-            📦 バックアップを書き出す
-          </button>
-          <label style={{ flex: 1, background: C.card, border: `1.5px solid ${C.line}`,
-            color: C.ink, borderRadius: 14, padding: "12px 6px", fontSize: 13, fontWeight: 700,
-            fontFamily: FONT, cursor: "pointer", textAlign: "center" }}>
-            ↩️ ファイルから復元
-            <input type="file" accept=".json,application/json" style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ""; }} />
-          </label>
-        </div>
       </div>
     </div>
   );
