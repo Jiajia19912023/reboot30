@@ -1531,6 +1531,13 @@ export default function App() {
     });
   };
 
+  // すべての記録を削除し、今日をDay1として再スタートする
+  const wipeAllRecords = () => {
+    setState((prev) => ({ ...prev,
+      settings: { ...prev.settings, startDate: todayStr(), lastReset: todayStr() },
+      days: {} }));
+    setTab("log");
+  };
   const resetToDay1 = () => {
     setState((prev) => ({
       ...prev,
@@ -1557,7 +1564,7 @@ export default function App() {
   const moveRecipeToFolder = (recipeId, folderId) =>
     setMyRecipes((prev) => prev.map(r => r.id === recipeId ? { ...r, folderId: folderId || null } : r));
 
-  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, setTab,
+  const shared = { state, setState, currentDay, start, today, getDay, setDay, resetToDay1, wipeAllRecords, setTab,
     myRecipes, addMyRecipe, deleteMyRecipe, mode, setMode, th: THEME(mode),
     editDate, setEditDate,
     folders, addFolder, renameFolder, deleteFolder, moveRecipeToFolder };
@@ -1987,7 +1994,7 @@ function GuideScreen({ onClose, mode = "reboot", th }) {
 /* ============================================================
    LOG (記録)
    ============================================================ */
-function LogScreen({ today, getDay, setDay, resetToDay1, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
+function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, mode, state, start, currentDay, th, myRecipes, editDate, setEditDate }) {
   const [pickerSlot, setPickerSlot] = useState(null);
   const [confirmNG, setConfirmNG] = useState(null);
   const [exType, setExType] = useState("");
@@ -2298,6 +2305,21 @@ function LogScreen({ today, getDay, setDay, resetToDay1, mode, state, start, cur
           </div>
         </Modal>
       )}
+
+      {/* 全記録の一括削除(Day1からやり直し) */}
+      <div style={{ padding: "30px 18px 0" }}>
+        <button onClick={() => {
+          if (!window.confirm("すべての記録(食事・運動・体調・生理)を完全に削除します。よろしいですか？")) return;
+          if (!window.confirm("本当に削除しますか？この操作は元に戻せません。\n削除後は、今日がDay 1として再スタートします。")) return;
+          wipeAllRecords();
+        }} style={{ width: "100%", background: "transparent", border: `1.5px solid ${C.radish}`, color: C.radish,
+          borderRadius: 14, padding: "12px", fontSize: 13.5, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
+          すべての記録を削除して Day 1 からやり直す
+        </button>
+        <div style={{ fontSize: 11.5, color: C.inkFaint, textAlign: "center", marginTop: 8 }}>
+          マイレシピと設定は残ります。記録だけが消えます。
+        </div>
+      </div>
     </div>
   );
 }
@@ -2395,7 +2417,7 @@ function FoodPicker({ slot, onPick, onPickRecipe, onClose, mode, th, myRecipes =
       {tab === "food" ? (
         <>
           {!q && <div style={{ fontSize: 12, color: C.inkFaint, marginBottom: 8, fontWeight: 600 }}>クイック選択</div>}
-          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: "48vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: "42dvh", overflowY: "auto" }}>
             {foodResults.map((f) => {
               const vv = verdictFor(f, mode);
               return (
@@ -2420,7 +2442,7 @@ function FoodPicker({ slot, onPick, onPickRecipe, onClose, mode, th, myRecipes =
       ) : (
         <>
           {!q && <div style={{ fontSize: 12, color: C.inkFaint, marginBottom: 8, fontWeight: 600 }}>ツール内のレシピ({allRecipes.length}品)から選ぶ</div>}
-          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: "48vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: "42dvh", overflowY: "auto" }}>
             {recipeResults.map((r) => (
               <button key={r.id} onClick={()=>{ onPickRecipe(r); onClose(); }} style={{ display: "flex",
                 alignItems: "center", justifyContent: "space-between", gap: 8, background: C.card, border: `1px solid ${C.line}`,
@@ -3025,9 +3047,12 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
     const programDay = programDayFor(ds);
     const inProgram = programDay >= 1 && (mode === "paleo" || programDay <= 30) && !isFuture;
     let color = C.line, label = "-";
+    // 実際に記録がある日だけランクを表示する(生理トグル等で空のdayが作られてもCを出さない)
+    const hasRecord = d && (["breakfast","lunch","dinner","snack"].some(k=>d.meals[k].length)
+      || (d.exercise||[]).length > 0 || d.sleep > 0 || d.moodQuality > 0);
     if (d) {
       if (d.violation) { color = C.radish; label = "✕"; }
-      else { const { rank } = scoreDay(d, mode); color = RANK_COLOR[rank]; label = rank; }
+      else if (hasRecord) { const { rank } = scoreDay(d, mode); color = RANK_COLOR[rank]; label = rank; }
     }
     cells.push({ ds, dateObj, inMonth, d, isFuture, isToday, programDay, inProgram, color, label,
       pInfo: d && d.period ? periodInfo(state.days, ds) : null });
@@ -3511,11 +3536,24 @@ function Modal({ title, children, onClose }) {
 }
 
 function Sheet({ title, children, onClose }) {
+  // スマホのキーボード表示時は visualViewport が縮むので、シートを「見えている領域」の下端に合わせる。
+  // これでキーボードの裏に検索結果が隠れなくなる。
+  const [vv, setVv] = useState(null);
+  useEffect(() => {
+    const v = window.visualViewport;
+    if (!v) return;
+    const on = () => setVv({ h: v.height, t: v.offsetTop });
+    v.addEventListener("resize", on); v.addEventListener("scroll", on); on();
+    return () => { v.removeEventListener("resize", on); v.removeEventListener("scroll", on); };
+  }, []);
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(51,48,42,0.4)", zIndex: 70,
+    <div onClick={onClose} style={{ position: "fixed", left: 0, right: 0,
+      top: vv ? vv.t : 0, height: vv ? vv.h : "100%",
+      background: "rgba(51,48,42,0.4)", zIndex: 70,
       display: "flex", alignItems: "flex-end", justifyContent: "center", maxWidth: 480, margin: "0 auto" }}>
       <div onClick={(e)=>e.stopPropagation()} style={{ background: C.paper, borderRadius: "24px 24px 0 0",
-        padding: "10px 18px calc(24px + env(safe-area-inset-bottom))", width: "100%", maxHeight: "88vh",
+        padding: "10px 18px calc(24px + env(safe-area-inset-bottom))", width: "100%",
+        maxHeight: vv ? Math.round(vv.h * 0.94) : "88vh",
         overflowY: "auto", fontFamily: FONT }}>
         <div style={{ width: 40, height: 4, background: C.line, borderRadius: 999, margin: "4px auto 14px" }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
