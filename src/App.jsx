@@ -1326,6 +1326,24 @@ const emptyDay = () => ({
   libido: 0,
 });
 
+// 食事の記録(食べなかった記録を含む)がある日か
+function hasMealRecord(d) {
+  if (!d) return false;
+  const m = d.meals || {};
+  return ["breakfast","lunch","dinner","snack"].some(k => (m[k] || []).length > 0)
+    || Object.values(d.skipped || {}).some(Boolean);
+}
+// startからdsまでの「食事記録がある日」の数。記録がない日はカウントを進めない
+function recordedDayNo(days, start, ds) {
+  const s0 = parseLocalDate(start), e0 = parseLocalDate(ds);
+  if (e0 < s0) return 0;
+  let n = 0;
+  for (let t = new Date(s0); t <= e0; t.setDate(t.getDate() + 1)) {
+    if (hasMealRecord(days[todayStr(t)])) n++;
+  }
+  return n;
+}
+
 function scoreDay(day, mode = "reboot") {
   if (!day) return { score: 0, rank: "-", parts: [] };
   const all = [...day.meals.breakfast, ...day.meals.lunch, ...day.meals.dinner, ...day.meals.snack];
@@ -1522,10 +1540,16 @@ export default function App() {
     return <div style={{ height: "100vh", display: "grid", placeItems: "center", background: C.paper, fontFamily: FONT, color: C.inkSoft }}>読み込み中…</div>;
   }
 
-  const start = state.settings.startDate;
+  const rawStart = state.settings.startDate;
   const today = todayStr();
-  const currentDay = Math.min(30, daysBetween(start, today) + 1);
   const mode = state.settings.mode || "paleo";
+  // リブートは「最初に食事を記録した日」をDay 1にする。
+  // 過去の日付に記録を追加すれば、その日がD1になって以降が繰り上がる
+  const firstRecorded = Object.keys(state.days).filter(k => hasMealRecord(state.days[k])).sort()[0] || null;
+  const start = (mode === "reboot" && firstRecorded && firstRecorded < rawStart) ? firstRecorded : rawStart;
+  // 食事を記録した日だけDayが進む。記録がない日はスキップ
+  const recordedSoFar = recordedDayNo(state.days, start, today);
+  const currentDay = Math.min(30, hasMealRecord(state.days[today]) ? Math.max(1, recordedSoFar) : recordedSoFar + 1);
   const setMode = (m) => setState((prev) => ({ ...prev, settings: { ...prev.settings, mode: m } }));
   const getDay = (ds) => state.days[ds] || null;
   const setDay = (ds, updater) => {
@@ -1666,23 +1690,55 @@ function THEME(mode) {
 /* ============================================================
    HOME
    ============================================================ */
+// 直近の記録(睡眠・気分・生理・運動)と経過日数から、今日のひとことを選ぶ
+function dailyAdvice(state, today, currentDay, mode) {
+  const t = state.days[today];
+  const y = state.days[todayStr(addDays(parseLocalDate(today), -1))];
+  if (t && t.period) return "生理中は無理をしないのが最優先。鉄分(赤身肉・レバー)と温かい汁物を意識して。休むことも立派な記録です。";
+  if (y && y.period && !(t && t.period)) return "生理明けは体が軽くなり始める時期。散歩など軽い運動を再開するのにちょうどいいタイミングです。";
+  if (y && y.sleep > 0 && y.sleep <= 2) return "昨日は眠りが浅めでした。今日はカフェインを午前中までにして、寝る90分前の入浴を試してみてください。";
+  if (y && y.moodQuality > 0 && y.moodQuality <= 2) return "気分が下がる日もあって当然です。今日は「ちゃんと作る」より「ちゃんと食べる」だけでOK。汁物一杯でも充分。";
+  if (y && y.counters && y.counters.waterOnly) return "昨日は水だけで過ごせました。カフェインが減ると数日で眠りの深さが変わってきます。この調子。";
+  if (y && (y.exercise || []).length > 0) return "昨日は体も動かせました。食事×運動の組み合わせは、どちらか片方だけの何倍も効きます。";
+  if (mode === "paleo") {
+    const tips = [
+      "パレオは「完璧」より「継続」。8割守れていれば充分に体は変わります。",
+      "食材の種類を増やすのが今週のテーマ。使ったことのない野菜をひとつ買ってみて。",
+      "タンパク質は体重×1.2〜1.6gが目安。足りない日は卵やボーンブロスで補って。",
+      "空腹を感じてから食べるのが本来のリズム。時間だから食べる、をやめてみる日があってもいい。",
+      "睡眠は最強の食事管理。22〜23時台に寝た翌日は食欲が安定しやすいはず。",
+      "発酵食品(ザワークラウト・水キムチ)を常備すると、腸の調子が安定します。",
+      "外食の日は「肉か魚+野菜」の形を選べば大きく外しません。",
+    ];
+    return tips[(currentDay - 1) % tips.length];
+  }
+  if (currentDay <= 2) return "最初の2日は「家からNG食品を減らす」だけで大成功。完璧を目指さないのがコツです。";
+  if (currentDay <= 5) return "3〜5日目は頭痛やだるさが出やすい時期(切り替え反応)。塩と水を多めに、無理をしないで。";
+  if (currentDay <= 9) return "体が脂質をエネルギーに使い始める頃。食後の眠気が減ってきたらいいサインです。";
+  if (currentDay <= 14) return "2週目です。肌・睡眠・お腹の変化を体調メモに残しておくと、あとで自分の説明書になります。";
+  if (currentDay <= 20) return "折り返し地点。マンネリ対策に、レシピタブで使ったことのないジャンル(地中海・エスニック)を覗いてみて。";
+  if (currentDay <= 26) return "仕上げの週。30日後の再導入(1品ずつ・2〜3日おき)を今から考えておくとスムーズです。";
+  if (currentDay <= 30) return "ラストスパート。ここまでの記録があなたの財産です。完走後の体の声を聞く準備を。";
+  return "30日おつかれさまでした。除去して分かった「自分に合わない食品」を避けるだけで、効果は続きます。";
+}
+
 function HomeScreen({ state, currentDay, today, getDay, start, setTab, mode, setMode, th }) {
   const day = getDay(today);
-  const { score, rank, parts } = scoreDay(day || emptyDay(), mode);
   const [guideOpen, setGuideOpen] = useState(false);
-  const [scoreOpen, setScoreOpen] = useState(false);
 
+  // 記録した日だけの連続カウント(NG違反でリセット)
   let completed = 0;
-  for (let i = 0; i < currentDay; i++) {
-    const ds = todayStr(addDays(parseLocalDate(start), i));
-    const d = state.days[ds];
-    if (d && d.violation) { completed = 0; } else { completed++; }
-  }
+  { const s0 = parseLocalDate(start), e0 = parseLocalDate(today);
+    for (let t = new Date(s0); t <= e0; t.setDate(t.getDate() + 1)) {
+      const dd = state.days[todayStr(t)];
+      if (!hasMealRecord(dd)) continue;
+      if (dd.violation) completed = 0; else completed++;
+    } }
+  const advice = dailyAdvice(state, today, currentDay, mode);
 
   const watch = useMemo(() => nutritionWatch(state, today), [state, today]);
   const isDone = currentDay >= 30;
-  const pct = Math.min(100, score);
-  const ringColor = RANK_COLOR[rank] || C.green;
+  const pct2 = mode === "paleo" ? 100 : Math.min(100, (currentDay / 30) * 100);
 
   return (
     <div>
@@ -1693,32 +1749,27 @@ function HomeScreen({ state, currentDay, today, getDay, start, setTab, mode, set
 
         <div style={{ background: C.card, borderRadius: 22, padding: 20, border: `1px solid ${C.line}`,
           display: "flex", alignItems: "center", gap: 20, boxShadow: "0 2px 10px rgba(90,80,50,0.04)" }}>
-          <button onClick={()=>setScoreOpen(true)} style={{ position: "relative", width: 112, height: 112, flexShrink: 0,
-            background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: FONT }}>
+          <div style={{ position: "relative", width: 112, height: 112, flexShrink: 0, fontFamily: FONT }}>
             <svg width="112" height="112" viewBox="0 0 112 112">
               <circle cx="56" cy="56" r="48" fill="none" stroke={C.cardWarm} strokeWidth="10" />
-              <circle cx="56" cy="56" r="48" fill="none" stroke={ringColor} strokeWidth="10"
-                strokeLinecap="round" strokeDasharray={`${(pct/100)*301.6} 301.6`}
+              <circle cx="56" cy="56" r="48" fill="none" stroke={th.accent} strokeWidth="10"
+                strokeLinecap="round" strokeDasharray={`${(pct2/100)*301.6} 301.6`}
                 transform="rotate(-90 56 56)" style={{ transition: "stroke-dasharray .5s" }} />
             </svg>
             <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
               <div>
-                <div style={{ fontSize: 30, fontWeight: 800, color: ringColor, lineHeight: 1 }}>{rank}</div>
-                <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 2, textDecoration: "underline", textDecorationColor: C.line }}>{score}点</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: th.accentDeep, lineHeight: 1 }}>{currentDay}</div>
+                <div style={{ fontSize: 11.5, color: C.inkSoft, marginTop: 2 }}>日目</div>
               </div>
             </div>
-          </button>
+          </div>
           <div>
             <div style={{ fontSize: 13, color: th.accent, fontWeight: 700 }}>{mode === "paleo" ? "パレオ生活" : (isDone ? "🎉 30日達成！" : "リブート")}</div>
             <div style={{ fontSize: 40, fontWeight: 800, color: th.accentDeep, lineHeight: 1.1 }}>
               Day {currentDay}{mode !== "paleo" && <span style={{ fontSize: 18, color: C.inkFaint }}> / 30</span>}
             </div>
-            <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 4 }}>連続 {completed} 日クリア</div>
-            <button onClick={()=>setScoreOpen(true)} style={{ marginTop: 8, background: "none", border: "none",
-              padding: 0, cursor: "pointer", fontFamily: FONT, fontSize: 12, fontWeight: 700, color: th.accent,
-              display: "flex", alignItems: "center", gap: 4 }}>
-              {score}点の内訳をみる <ChevronRight size={13} />
-            </button>
+            <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 4 }}>連続 {completed} 日記録</div>
+            <div style={{ fontSize: 11, color: C.inkFaint, marginTop: 6, lineHeight: 1.5 }}>食事を記録した日だけ<br/>Dayが進みます</div>
           </div>
         </div>
 
@@ -1727,6 +1778,15 @@ function HomeScreen({ state, currentDay, today, getDay, start, setTab, mode, set
             <div style={{ height: "100%", width: `${(currentDay/30)*100}%`, background: th.accent, borderRadius: 999 }} />
           </div>
         )}
+
+        <div style={{ marginTop: 14, background: th.accentSoft, borderRadius: 16, padding: "14px 16px",
+          display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>🌱</span>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: th.accentDeep, marginBottom: 3 }}>今日のひとこと</div>
+            <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.65 }}>{advice}</div>
+          </div>
+        </div>
 
         <button onClick={()=>setGuideOpen(true)} style={{ width: "100%", marginTop: 14, background: C.card,
           border: `1.5px solid ${C.line}`, borderRadius: 16, padding: "13px 16px", display: "flex",
@@ -1758,35 +1818,6 @@ function HomeScreen({ state, currentDay, today, getDay, start, setTab, mode, set
         <div style={{ height: 8 }} />
       </div>
       {guideOpen && <GuideScreen onClose={() => setGuideOpen(false)} mode={mode} th={th} />}
-      {scoreOpen && (
-        <Modal onClose={()=>setScoreOpen(false)} title={`今日のスコア ${score}点 (${rank})`}>
-          <div style={{ fontSize: 12.5, color: C.inkSoft, marginBottom: 12, lineHeight: 1.6 }}>
-            達成した項目が加点されます。NG食品を避けるのは前提条件です。
-          </div>
-          <div style={{ background: C.card, borderRadius: 16, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-            {parts.map((p, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "12px 14px", borderTop: i ? `1px solid ${C.line}` : "none" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14,
-                  color: p.ok ? C.ink : C.inkFaint }}>
-                  <span style={{ width: 22, height: 22, borderRadius: 999, display: "grid", placeItems: "center",
-                    background: p.ok ? th.accentSoft : C.cardWarm }}>
-                    {p.ok ? <Check size={14} strokeWidth={3} color={th.accent} /> : <span style={{ width: 6, height: 6, borderRadius: 999, background: C.inkFaint }} />}
-                  </span>
-                  {p.label}
-                </span>
-                <span style={{ fontSize: 13.5, fontWeight: 800, color: p.ok ? th.accent : C.inkFaint }}>
-                  {p.ok ? `+${p.pts}` : `+0`}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14,
-            padding: "0 4px", fontSize: 15, fontWeight: 800 }}>
-            <span>合計</span><span style={{ color: th.accentDeep }}>{score} / 100点</span>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -1856,14 +1887,15 @@ function CompletionCard({ state, start }) {
 }
 
 function CompletionReport({ state, start, onClose }) {
+  // 「食事を記録した日」の最初の30日分を対象にする
   const days = [];
-  for (let i = 0; i < 30; i++) {
-    const ds = todayStr(addDays(parseLocalDate(start), i));
-    days.push(state.days[ds]);
-  }
+  { const s0 = parseLocalDate(start), e0 = new Date();
+    for (let t = new Date(s0); t <= e0 && days.length < 30; t.setDate(t.getDate() + 1)) {
+      const d = state.days[todayStr(t)];
+      if (hasMealRecord(d)) days.push(d);
+    } }
   const logged = days.filter(Boolean);
-  const scores = logged.map(d => scoreDay(d, "reboot").score); // 30日リブート完走レポートなのでリブート基準で採点
-  const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+  const exDays = logged.filter(d => (d.exercise || []).length > 0).length;
   const fishDays = logged.filter(d => [...d.meals.breakfast,...d.meals.lunch,...d.meals.dinner,...d.meals.snack].some(it=>(it.f||[]).includes("fish"))).length;
   const violations = logged.filter(d => d.violation).length;
 
@@ -1879,7 +1911,7 @@ function CompletionReport({ state, start, onClose }) {
     <Modal onClose={onClose} title="30日リブート 振り返り">
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
         <Stat label="記録した日数" value={`${logged.length}/30`} />
-        <Stat label="平均スコア" value={`${avg}点`} />
+        <Stat label="運動した日" value={`${exDays}日`} />
         <Stat label="魚を食べた日" value={`${fishDays}日`} />
         <Stat label="違反した日" value={`${violations}日`} color={violations ? C.radish : C.green} />
       </div>
@@ -2051,7 +2083,7 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
 
   const d = getDay(editDate) || emptyDay();
   const isToday = editDate === today;
-  const editDayNo = daysBetween(start, editDate) + 1;
+  const editDayNo = hasMealRecord(state.days[editDate]) ? recordedDayNo(state.days, start, editDate) : 0;
   const dt = parseLocalDate(editDate);
 
   const slots = [
@@ -2073,6 +2105,7 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
   });
   const setCounter = (k, val) => setDay(editDate, (x) => { x.counters[k] = Math.max(0, val); return x; });
   const toggleWater = () => setDay(editDate, (x) => { x.counters.waterOnly = !x.counters.waterOnly; return x; });
+  // コーヒー・お茶を入力したら「水だけ」は自動で外す(両立しないため)
   const addExercise = () => {
     if (!exType.trim()) return;
     setDay(editDate, (x) => { x.exercise = [...x.exercise, { type: exType, min: Number(exMin)||0 }]; return x; });
@@ -2110,12 +2143,10 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
     setFlash(true); setTimeout(()=>setFlash(false), 1800);
   };
 
-  const { score, rank } = scoreDay(d, mode);
-
   return (
     <div>
       <Header th={th} title={isToday ? "今日の記録" : (editDayNo >= 1 ? `Day ${editDayNo} の記録` : `${dt.getMonth()+1}月${dt.getDate()}日の記録`)}
-        sub={`${dt.getMonth()+1}月${dt.getDate()}日 · 合計 ${score}点 · ランク ${rank}`} />
+        sub={`${dt.getMonth()+1}月${dt.getDate()}日${d.saved ? " · 登録済み" : ""}`} />
       <div style={{ padding: "4px 18px 20px" }}>
 
         {/* 日付ナビ + 履歴 */}
@@ -2195,16 +2226,16 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
         <SectionLabel>上限つきカウンター</SectionLabel>
         <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 6 }}>
           <Counter label="フルーツ" unit="g" max={lim.fruit} value={d.counters.fruitG} step={20}
-            onChange={(v)=>setCounter("fruitG",v)} disabled={d.counters.waterOnly} />
+            onChange={(v)=>setCounter("fruitG",v)} />
           <Counter label="コーヒー" unit="ml" max={lim.coffee} value={d.counters.coffeeMl} step={50}
-            onChange={(v)=>setCounter("coffeeMl",v)} disabled={d.counters.waterOnly} />
+            onChange={(v)=>setCounter("coffeeMl",v)} />
           <Counter label="お茶" unit="ml" max={lim.tea} value={d.counters.teaMl} step={100}
-            onChange={(v)=>setCounter("teaMl",v)} disabled={d.counters.waterOnly} />
+            onChange={(v)=>setCounter("teaMl",v)} />
           <button onClick={toggleWater} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
             gap: 8, padding: "11px", margin: "4px 0 0", background: d.counters.waterOnly ? C.sky : "transparent",
             color: d.counters.waterOnly ? "#fff" : C.sky, border: `1.5px solid ${C.sky}`, borderRadius: 12,
             fontSize: 13.5, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
-            <Droplet size={16} /> 水だけで過ごした（+5点）
+            <Droplet size={16} /> 水だけで過ごした
           </button>
         </div>
 
@@ -2389,28 +2420,28 @@ function LogScreen({ today, getDay, setDay, resetToDay1, wipeAllRecords, deleteD
 
 function HistoryList({ state, start, currentDay, today, mode, th, onPick }) {
   const entries = [];
-  for (let i = 0; i < currentDay; i++) {
+  const total = daysBetween(start, today) + 1;
+  for (let i = 0; i < total; i++) {
     const ds = todayStr(addDays(parseLocalDate(start), i));
     const d = state.days[ds];
-    entries.push({ ds, dayNo: i + 1, d, isToday: ds === today });
+    entries.push({ ds, dayNo: hasMealRecord(d) ? recordedDayNo(state.days, start, ds) : 0, d, isToday: ds === today });
   }
   entries.reverse();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {entries.map(({ ds, dayNo, d, isToday }) => {
         const dt = parseLocalDate(ds);
-        const { score, rank } = d ? scoreDay(d, mode) : { score: 0, rank: "-" };
-        const hasData = d && (["breakfast","lunch","dinner","snack"].some(k=>d.meals[k].length) || d.exercise.length || d.mood || d.sleep || d.moodQuality || d.period);
+        const hasData = d && (["breakfast","lunch","dinner","snack"].some(k=>d.meals[k].length) || d.exercise.length || d.mood || d.sleep || d.moodQuality || d.period || Object.values(d.skipped||{}).some(Boolean));
         return (
           <button key={ds} onClick={()=>onPick(ds)} style={{ display: "flex", alignItems: "center", gap: 12,
             background: C.card, border: `1px solid ${isToday ? th.accent : C.line}`, borderRadius: 14, padding: "12px 14px",
             cursor: "pointer", fontFamily: FONT, textAlign: "left", width: "100%" }}>
-            <span style={{ width: 44, height: 44, borderRadius: 12, background: d && hasData ? RANK_COLOR[rank] : C.cardWarm,
+            <span style={{ width: 44, height: 44, borderRadius: 12, background: d && hasData ? th.accent : C.cardWarm,
               color: d && hasData ? "#fff" : C.inkFaint, display: "grid", placeItems: "center", flexShrink: 0,
-              fontSize: 18, fontWeight: 800 }}>{d && hasData ? rank : "–"}</span>
+              fontSize: 18, fontWeight: 800 }}>{d && hasData ? "✓" : "–"}</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Day {dayNo} {isToday && <span style={{ fontSize: 11, color: th.accent }}>(今日)</span>}</div>
-              <div style={{ fontSize: 12, color: C.inkSoft }}>{dt.getMonth()+1}月{dt.getDate()}日 · {hasData ? `${score}点` : "未記録"}{d && d.saved ? " · 登録済み" : ""}</div>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>{dayNo >= 1 ? `Day ${dayNo}` : `${dt.getMonth()+1}月${dt.getDate()}日`} {isToday && <span style={{ fontSize: 11, color: th.accent }}>(今日)</span>}</div>
+              <div style={{ fontSize: 12, color: C.inkSoft }}>{dt.getMonth()+1}月{dt.getDate()}日 · {hasData ? "記録あり" : "未記録"}{d && d.saved ? " · 登録済み" : ""}</div>
             </div>
             <Pencil size={16} color={C.inkFaint} />
           </button>
@@ -3090,7 +3121,7 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
   const todayDs = today || todayStr();
   const [viewDate, setViewDate] = useState(() => { const t = new Date(todayDs); return new Date(t.getFullYear(), t.getMonth(), 1); });
 
-  const programDayFor = (ds) => Math.round((parseLocalDate(ds) - parseLocalDate(start)) / 86400000) + 1;
+  const programDayFor = (ds) => recordedDayNo(state.days, start, ds);
 
   // 月グリッド生成(日曜始まり、前後月の余白セルも含む)
   const year = viewDate.getFullYear(), monthIdx = viewDate.getMonth();
@@ -3107,40 +3138,39 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
     const d = state.days[ds];
     const isFuture = ds > todayDs;
     const isToday = ds === todayDs;
-    const programDay = programDayFor(ds);
-    const inProgram = programDay >= 1 && (mode === "paleo" || programDay <= 30) && !isFuture;
+    // 食事記録がある日だけDay番号が付く(記録がない日はスキップ)
+    const mealRec = hasMealRecord(d);
+    const programDay = mealRec ? programDayFor(ds) : 0;
+    const inProgram = mealRec && programDay >= 1 && (mode === "paleo" || programDay <= 30) && !isFuture;
     let color = C.line, label = "-";
-    // 実際に記録がある日だけランクを表示する(生理トグル等で空のdayが作られてもCを出さない)
-    const hasRecord = d && (["breakfast","lunch","dinner","snack"].some(k=>d.meals[k].length)
-      || (d.exercise||[]).length > 0 || d.sleep > 0 || d.moodQuality > 0
-      || Object.values(d.skipped || {}).some(Boolean));
+    const hasRecord = d && (mealRec || (d.exercise||[]).length > 0 || d.sleep > 0 || d.moodQuality > 0);
     if (d) {
       if (d.violation) { color = C.radish; label = "✕"; }
-      else if (hasRecord) { const { rank } = scoreDay(d, mode); color = RANK_COLOR[rank]; label = rank; }
+      else if (hasRecord) { color = th.accent; label = "●"; }
     }
     cells.push({ ds, dateObj, inMonth, d, isFuture, isToday, programDay, inProgram, color, label,
       pInfo: d && d.period ? periodInfo(state.days, ds) : null });
     if (i >= 34 && dateObj.getMonth() !== monthIdx && (i+1) % 7 === 0) break; // 月が収まったら余分な週は打ち切り
   }
 
+  // 記録がある日だけを時系列に並べる(記録なしの日はスキップ)
   const combined = [];
   let recordedCount = 0;
-  for (let i = 0; i < currentDay; i++) {
-    const ds = todayStr(addDays(parseLocalDate(start), i));
-    const d = state.days[ds];
-    const dayNo = i + 1;
-    const { score, rank } = scoreDay(d, mode);
-    const hasMeal = d && ["breakfast","lunch","dinner","snack"].some(k=>d.meals[k].length);
-    if (hasMeal || (d && (d.sleep>0 || d.moodQuality>0 || d.libido>0))) recordedCount++;
-    combined.push({
-      day: dayNo,
-      score,
-      sleep: d && d.sleep > 0 ? d.sleep : null,
-      mood: d && d.moodQuality > 0 ? d.moodQuality : null,
-      libido: d && d.libido > 0 ? d.libido : null,
-      period: !!(d && d.period),
-    });
-  }
+  { const s0 = parseLocalDate(start), e0 = parseLocalDate(todayDs);
+    for (let t = new Date(s0); t <= e0; t.setDate(t.getDate() + 1)) {
+      const ds2 = todayStr(t);
+      const d = state.days[ds2];
+      const rec = hasMealRecord(d) || (d && (d.sleep>0 || d.moodQuality>0 || d.libido>0));
+      if (!rec) continue;
+      recordedCount++;
+      combined.push({
+        day: recordedCount,
+        sleep: d && d.sleep > 0 ? d.sleep : null,
+        mood: d && d.moodQuality > 0 ? d.moodQuality : null,
+        libido: d && d.libido > 0 ? d.libido : null,
+        period: !!(d && d.period),
+      });
+    } }
   const useSample = recordedCount < 3;
   const chartData = useSample ? SAMPLE_COMBINED : combined;
   // 生理を1度でも記録した人にのみ月経周期セクションを表示
@@ -3150,7 +3180,7 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
 
   return (
     <div>
-      <Header th={th} title="カレンダー" sub={mode === "paleo" ? `パレオ ${programDayFor(todayDs)}日目` : `リブート Day ${Math.min(30, programDayFor(todayDs))}`} />
+      <Header th={th} title="カレンダー" sub={mode === "paleo" ? `パレオ ${currentDay}日目` : `リブート Day ${Math.min(30, currentDay)}`} />
       <div style={{ padding: "8px 18px 20px" }}>
 
         {/* 月ナビゲーション */}
@@ -3188,8 +3218,8 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
                   cursor: c.isFuture ? "default" : "pointer", fontFamily: FONT, padding: "3px 2px 4px",
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
                   opacity: !c.inMonth ? 0.25 : c.isFuture ? 0.45 : 1, position: "relative" }}>
-                <span style={{ fontSize: 12, fontWeight: c.isToday ? 800 : 600,
-                  color: c.isToday ? th.accentDeep : C.ink }}>{c.dateObj.getDate()}</span>
+                <span style={{ fontSize: 12, fontWeight: c.isToday ? 800 : 600, alignSelf: "flex-start",
+                  paddingLeft: 4, color: c.isToday ? th.accentDeep : C.ink }}>{c.dateObj.getDate()}</span>
                 {c.inProgram && (
                   <span style={{ fontSize: 8, fontWeight: 700, color: th.accent, lineHeight: 1 }}>
                     {mode === "paleo" ? `${c.programDay}日` : `D${c.programDay}`}
@@ -3211,7 +3241,7 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18, justifyContent: "center" }}>
-          {[["A",C.greenDeep],["B",C.carrot],["C",C.inkFaint],["✕",C.radish]].map(([l,col]) => (
+          {[["● 記録あり",th.accent],["✕ NG食品",C.radish]].map(([l,col]) => (
             <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: C.inkSoft }}>
               <span style={{ width: 13, height: 13, borderRadius: 4, background: col }} />{l}</span>
           ))}
@@ -3221,11 +3251,11 @@ function CalendarScreen({ state, start, currentDay, getDay, setDay, mode, th, to
           </span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: C.inkSoft }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: th.accent }}>D1</span>
-            {mode === "paleo" ? "パレオ継続日数" : "リブート日数"}
+            {mode === "paleo" ? "パレオ継続日数" : "記録した日だけDayが進みます"}
           </span>
         </div>
 
-        <SectionLabel>推移と相関 <span style={{ fontWeight: 500, color: C.inkFaint, fontSize: 11 }}>睡眠・気分・食事・生理をまとめて</span></SectionLabel>
+        <SectionLabel>推移と相関 <span style={{ fontWeight: 500, color: C.inkFaint, fontSize: 11 }}>睡眠・気分・生理をまとめて</span></SectionLabel>
         <CombinedTrend data={chartData} sample={useSample} th={th} />
 
         {hasPeriodRecord && (
@@ -3277,7 +3307,6 @@ function CombinedTrend({ data, sample, th }) {
         <Leg color={C.sky} label="睡眠" small />
         <Leg color={C.carrot} label="気分" small />
         <Leg color="#B0577F" label="性欲・活力" small />
-        <Leg color={th.accent} label="食事" area small />
       </div>
       <ResponsiveContainer width="100%" height={160}>
         <ComposedChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -3285,14 +3314,11 @@ function CombinedTrend({ data, sample, th }) {
           <XAxis dataKey="day" tick={{ fontSize: 9.5, fill: C.inkFaint, fontFamily: FONT }} axisLine={{ stroke: C.line }} tickLine={false} />
           {/* 左軸: 睡眠・気分 (0-5) */}
           <YAxis yAxisId="q" domain={[0, 5]} ticks={[1,3,5]} tick={{ fontSize: 9.5, fill: C.inkFaint, fontFamily: FONT }} axisLine={false} tickLine={false} width={22} />
-          {/* 右軸: 食事スコア (0-100) */}
-          <YAxis yAxisId="s" orientation="right" domain={[0, 100]} ticks={[0,50,100]} tick={{ fontSize: 9.5, fill: C.inkFaint, fontFamily: FONT }} axisLine={false} tickLine={false} width={26} />
           <Tooltip
             labelFormatter={(l)=>`Day ${l}`}
             formatter={(v, name)=> v == null ? ["未記録", name] : [v, name]}
             contentStyle={{ fontFamily: FONT, fontSize: 12, borderRadius: 10, border: `1px solid ${C.line}`, background: C.card }}
           />
-          <Area yAxisId="s" type="monotone" dataKey="score" name="食事スコア" fill={th.accent} fillOpacity={0.13} stroke={th.accent} strokeOpacity={0.35} strokeWidth={1.5} />
           <Line yAxisId="q" type="monotone" dataKey="sleep" name="睡眠" stroke={C.sky} strokeWidth={2.2} dot={{ r: 2.5, fill: C.sky }} connectNulls />
           <Line yAxisId="q" type="monotone" dataKey="mood" name="気分" stroke={C.carrot} strokeWidth={2.2} dot={{ r: 2.5, fill: C.carrot }} connectNulls />
           <Line yAxisId="q" type="monotone" dataKey="libido" name="性欲・活力" stroke="#B0577F" strokeWidth={2.2} dot={{ r: 2.5, fill: "#B0577F" }} connectNulls />
@@ -3501,7 +3527,6 @@ function phaseRange(i) {
 
 function DaySheet({ ds, day, setDay, mode }) {
   const d = day || null;
-  const { score, rank } = scoreDay(d, mode);
   const slots = [["breakfast","朝"],["lunch","昼"],["dinner","夕"],["snack","間食"]];
   const hasMeals = d && slots.some(([k]) => d.meals[k].length > 0);
 
@@ -3514,12 +3539,7 @@ function DaySheet({ ds, day, setDay, mode }) {
     <div>
       {d && hasMeals ? (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-            <span style={{ width: 52, height: 52, borderRadius: 14, background: RANK_COLOR[rank], color: "#fff",
-              display: "grid", placeItems: "center", fontSize: 24, fontWeight: 800 }}>{rank}</span>
-            <div><div style={{ fontSize: 22, fontWeight: 800 }}>{score}<span style={{ fontSize: 13, color: C.inkFaint }}>点</span></div>
-              {d.violation && <div style={{ fontSize: 12, color: C.radish, fontWeight: 700 }}>NG違反あり</div>}</div>
-          </div>
+          {d.violation && <div style={{ fontSize: 12.5, color: C.radish, fontWeight: 700, marginBottom: 12 }}>⚠ NG食品の記録があった日です</div>}
           {slots.map(([k,l]) => d.meals[k].length > 0 && (
             <div key={k} style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, color: C.inkSoft, fontWeight: 700, marginBottom: 5 }}>{l}</div>
@@ -3605,6 +3625,11 @@ function Modal({ title, children, onClose }) {
 }
 
 function Sheet({ title, children, onClose }) {
+  // シートを開いた時点のスクロール位置を保存し、閉じたら元の位置に戻す(記録画面のズレ防止)
+  useEffect(() => {
+    const y = window.scrollY;
+    return () => { requestAnimationFrame(() => window.scrollTo(0, y)); };
+  }, []);
   // スマホのキーボード表示時は visualViewport が縮むので、シートを「見えている領域」の下端に合わせる。
   // これでキーボードの裏に検索結果が隠れなくなる。
   const [vv, setVv] = useState(null);
